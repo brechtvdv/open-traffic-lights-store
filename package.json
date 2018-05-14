@@ -1,0 +1,30 @@
+{
+  "name": "open-traffic-lights-store",
+  "version": "1.0.0",
+  "description": "Triplestore for traffic light data",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Lamasaurus/open-traffic-lights-store.git"
+  },
+  "keywords": [
+    "open",
+    "traffic",
+    "light",
+    "triplestore",
+    "RDF"
+  ],
+  "author": "Sander Vanhove",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/Lamasaurus/open-traffic-lights-store/issues"
+  },
+  "homepage": "https://github.com/Lamasaurus/open-traffic-lights-store#readme",
+  "dependencies": {
+    "n3": "^1.0.0-beta.1",
+    "rdflib": "^0.16.7"
+  }
+}
