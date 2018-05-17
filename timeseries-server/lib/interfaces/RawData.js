@@ -2,6 +2,7 @@ const MultidimensionalInterface = require('../../lib/MultidimensionalInterface')
 const Utils = require('../../lib/Utils');
 const md5 = require('md5');
 const jsonld = require('jsonld');
+const fs = require('fs');
 
 class RawData extends MultidimensionalInterface {
 
@@ -13,8 +14,8 @@ class RawData extends MultidimensionalInterface {
     this._fragmentsPath = config.fragmentsPath;
     this._fragmentMaxSize = config.maxFileSize;
     this._staticTriples = config.staticTriples;
-    this._byteCounter = 0;
     //this._lastFragment = null;
+    this._maxMinutesPerFile = config.maxMinutes;
     this._lastGat = null;
     this._fragment_map = {};
 
@@ -31,18 +32,14 @@ class RawData extends MultidimensionalInterface {
   }
 
   async onData(data) {
-    this.latestData =  await jsonld.toRDF(JSON.parse(data));
+    let jsonld_data = JSON.parse(data)
+    // The data comes in as stringified jsonld, so we have to parse it and we can use the jsonld
+    // library to convert this to N-Quads.
+    this.latestData =  await jsonld.toRDF(jsonld_data);
     this.lastGat = await Utils.getGeneratedAtTimeValue(this.latestData);  
 
     // Store data in files according to config to keep historic data
-    this.storeData();
-
-    // If applicable push data to subscribed clients through Websocket
-    if (this.websocket) {
-      let st = await Utils.getTriplesFromFile(this.staticTriples);
-      let staticTriples = await Utils.formatTriples('application/trig', st[1], st[0]);
-      super.commMan.pushData(this.name, staticTriples.concat(data.toString()));
-    }
+    this.storeData(jsonld_data["@id"].split("\/").splice(-1)[0].split("?")[0]);
   }
 
   setupPollInterfaces() {
@@ -51,13 +48,16 @@ class RawData extends MultidimensionalInterface {
     // HTTP interface to get the latest data update
     super.commMan.router.get('/' + this.name + '/latest', async (ctx, next) => {
       ctx.response.set({ 'Access-Control-Allow-Origin': '*' });
-      if (self.latestData == null) {
+      let signal_group = ctx.query.sg;
+
+      if (!(signal_group in self._fragment_map)) {
         ctx.response.status = 404;
         ctx.response.body = "No data found";
       } else {
-        let etag = 'W/"' + md5(this.lastGat) + '"';
+        let signal_group_fragment = this._fragment_map[signal_group]
+        let etag = 'W/"' + md5(signal_group_fragment.lastGat) + '"';
         let ifNoneMatchHeader = ctx.request.header['if-none-match'];
-        let last_modified = this.lastGat.toUTCString();
+        let last_modified = signal_group_fragment.lastGat;
         //let maxage = self.ldfs.calculateMaxAge();
         //let expires = self.ldfs.calculateExpires();
 
@@ -75,7 +75,7 @@ class RawData extends MultidimensionalInterface {
 
           let st = await Utils.getTriplesFromFile(this.staticTriples);
           let staticTriples = await Utils.formatTriples('application/trig', st[1], st[0]);
-          ctx.response.body = staticTriples.concat(self.latestData.toString());
+          ctx.response.body = staticTriples.concat(await Utils.nQuadsToTrig(signal_group_fragment.latestData))
         }
       }
     });
@@ -83,162 +83,73 @@ class RawData extends MultidimensionalInterface {
     // HTTP interface to get a specific fragment of data (historic data)
     super.commMan.router.get('/' + this.name + '/fragments', async (ctx, next) => {
       let queryTime = new Date(ctx.query.time);
+      let signal_group = ctx.query.sg;
 
-      if (queryTime.toString() === 'Invalid Date') {
-        // Redirect to now time
-        ctx.status = 302
-        ctx.redirect('/' + this.name + '/fragments?time=' + new Date().toISOString());
-        return;
+      // First we search for all fragments of this signal group
+      let fragments = Utils.getAllFragments(this.fragmentsPath).filter((file) => { return file.startsWith("signalgroup_" + signal_group); }).sort();
+      
+      // Then we search in which file the requested time falls 
+      let target_file = null;
+      let index = 0;
+      let time = 0;
+      for(let file = fragments.length - 1; file >= 0; file--){
+        time = new Date(fragments[file].split("signalgroup_" + signal_group + "-")[1].split(".trig")[0]);
+        if(time <= queryTime){
+          target_file = fragments[file];
+          index = file;
+          break;
+        }
       }
-
-      let fragments = Utils.getAllFragments(this.fragmentsPath).map(f => new Date(f.substring(0, f.indexOf('.trig'))).getTime());
-      let [fragment, index] = Utils.dateBinarySearch(queryTime.getTime(), fragments);
-
-      if (queryTime.getTime() !== fragment.getTime()) {
-        // Redirect to correct fragment URL
-        ctx.status = 302
-        ctx.redirect('/' + this.name + '/fragments?time=' + fragment.toISOString());
-        return;
-      }
-
-      let fc = Utils.getFragmentsCount(this.fragmentsPath);
 
       let st = await Utils.getTriplesFromFile(this.staticTriples);
       let staticTriples = await Utils.formatTriples('application/trig', st[1], st[0]);
-      let ft = await Utils.getTriplesFromFile(this.fragmentsPath + '/' + fragment.toISOString() + '.trig');
-      let fragmentTriples = await Utils.formatTriples('application/trig', ft[1], ft[0]);
-      let metaData = await this.createMetadata(fragment, index);
+      let dataTriples = await fs.readFileSync(this.fragmentsPath + "/" + target_file);
+      let metaData = await this.createMetadata(time, signal_group, index, fragments);
 
-      ctx.response.body = staticTriples.concat('\n' + fragmentTriples, '\n' + metaData);
+      ctx.response.body = staticTriples.concat('\n' + dataTriples, '\n' + metaData);
 
       ctx.response.set({
         'Access-Control-Allow-Origin': '*',
         'Content-Type': 'application/trig'
       });
 
-      if (index < (fc - 1)) {
-        // Cache older fragment that won't change over time
-        ctx.response.set({ 'Cache-Control': 'public, max-age=31536000, inmutable' });
-      } else {
-        // Do not cache current fragment as it will get more data
-        ctx.response.set({ 'Cache-Control': 'no-cache, no-store, must-revalidate' });
-      }
+      ctx.response.set({ 'Cache-Control': 'no-cache, no-store, must-revalidate' });
     });
   }
 
-  async storeData() {
-    // Get the signal group of this status
-    let signal_group = Utils.getSignalGroup(this.latestData);
-    
+  async storeData(signal_group) {
     // Create a mapping for new groups
     if(!(signal_group in this._fragment_map))
-      this._fragment_map[signal_group] = { lastFragment: null, byteCounter: 0 };
+      this._fragment_map[signal_group] = { lastFragment: null, startTime: null, lastGat: null, latestData: null};
     
     let signal_group_fragment = this._fragment_map[signal_group]
 
     // Create a new file if needed
-    if (signal_group_fragment.byteCounter === 0 || signal_group_fragment.byteCounter > 
-      this.fragmentMaxSize) {
+    if (signal_group_fragment.startTime === null || (((this.lastGat - signal_group_fragment.startTime) % 86400000) % 3600000) / 60000 > this._maxMinutesPerFile) {
       // Create new fragment
-      //this.lastFragment = this.fragmentsPath + '/' + this.lastGat.toISOString() + '.trig';
- 
       signal_group_fragment.lastFragment = this.fragmentsPath + '/signalgroup\_' 
-        + signal_group + '-' + this.lastGat + '.trig';
-      signal_group_fragment.byteCounter = 0;
+        + signal_group + '-' + this.lastGat.toISOString() + '.trig';
+      signal_group_fragment.startTime = this.lastGat;
     }
 
     await Utils.appendToFile(signal_group_fragment.lastFragment, this.latestData);
-    let bytes = Buffer.from(this.latestData.toString()).byteLength;
-    this.byteCounter += bytes;
+    signal_group_fragment.lastGat = this.lastGat;
+    signal_group_fragment.latestData = this.latestData;
   }
 
-  async createMetadata(fragment, index) {
+  async createMetadata(time, signal_group, index, fragments) {
     let baseUri = this.serverUrl + this.name + '/fragments';
-    let subject = baseUri + '?time=' + fragment.toISOString();
+    let subject = baseUri + '?time=' + time.toISOString() + '&sg=' + signal_group;
     let quads = [];
-
-    quads.push({
-      subject: subject,
-      predicate: 'http://www.w3.org/2000/01/rdf-schema#label',
-      object: '"Historic and real-time parking data in Ghent"',
-      graph: '#Metadata'
-    });
-    quads.push({
-      subject: subject,
-      predicate: 'http://www.w3.org/2000/01/rdf-schema#comment',
-      object: '"This document is a proof of concept mapping using Linked Datex2 by Pieter Colpaert and Julian Rojas"',
-      graph: '#Metadata'
-    });
-    quads.push({
-      subject: subject,
-      predicate: 'http://xmlns.com/foaf/0.1/homepage',
-      object: 'https://github.com/smartflanders/ghent-datex2-to-linkeddata',
-      graph: '#Metadata'
-    });
-    quads.push({
-      subject: subject,
-      predicate: 'http://creativecommons.org/ns#license',
-      object: 'https://data.stad.gent/algemene-licentie',
-      graph: '#Metadata'
-    });
-    quads.push({
-      subject: subject,
-      predicate: 'http://www.w3.org/ns/hydra/core#search',
-      object: subject + '#search',
-      graph: '#Metadata'
-    });
-    quads.push({
-      subject: subject + '#search',
-      predicate: 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type',
-      object: 'http://www.w3.org/ns/hydra/core#IriTemplate',
-      graph: '#Metadata'
-    });
-    quads.push({
-      subject: subject + '#search',
-      predicate: 'http://www.w3.org/ns/hydra/core#template',
-      object: '"' + baseUri + '{?time}"',
-      graph: '#Metadata'
-    });
-    quads.push({
-      subject: subject + '#search',
-      predicate: 'http://www.w3.org/ns/hydra/core#variableRepresentation',
-      object: 'http://www.w3.org/ns/hydra/core#BasicRepresentation',
-      graph: '#Metadata'
-    });
-    quads.push({
-      subject: subject + '#search',
-      predicate: 'http://www.w3.org/ns/hydra/core#mapping',
-      object: subject + '#mapping',
-      graph: '#Metadata'
-    });
-    quads.push({
-      subject: subject + '#mapping',
-      predicate: 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type',
-      object: 'http://www.w3.org/ns/hydra/core#IriTemplateMapping',
-      graph: '#Metadata'
-    });
-    quads.push({
-      subject: subject + '#mapping',
-      predicate: 'http://www.w3.org/ns/hydra/core#variable',
-      object: '"time"',
-      graph: '#Metadata'
-    });
-    quads.push({
-      subject: subject + '#mapping',
-      predicate: 'http://www.w3.org/ns/hydra/core#required',
-      object: '"true"^^http://www.w3.org/2001/XMLSchema#boolean',
-      graph: '#Metadata'
-    });
 
     if (index > 0) {
       // Adding hydra:previous link
-      let fragments = Utils.getAllFragments(this.fragmentsPath);
-      let previous = fragments[index - 1].substring(0, fragments[index - 1].indexOf('.trig'));
+      let previous = fragments[index - 1];
 
       quads.push({
         subject: subject,
         predicate: 'http://www.w3.org/ns/hydra/core#previous',
-        object: baseUri + '?time=' + previous,
+        object: baseUri + '?time=' + previous.split("signalgroup_" + signal_group + "-")[1].split(".trig")[0] + '&sg=' + signal_group,
         graph: '#Metadata'
       });
     }
@@ -268,14 +179,6 @@ class RawData extends MultidimensionalInterface {
 
   get staticTriples() {
     return this._staticTriples;
-  }
-
-  get byteCounter() {
-    return this._byteCounter;
-  }
-
-  set byteCounter(value) {
-    this._byteCounter = value;
   }
 
   get lastFragment() {

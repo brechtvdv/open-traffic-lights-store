@@ -6,6 +6,8 @@ run:
   node index.js | node timeseries-server/bin/timeseries-server.js -c timeseries-server/config.json
 ```
 
-https://github.com/OSLC/ldp-service/wiki/Which-RDF-Store-To-Use
-http://rdfextras.readthedocs.io/en/latest/store/mysqlpg.html
-https://github.com/4store/4store
+This implementation makes use of the [timeseries server](https://github.com/linkedtimeseries/timeseries-server).
+
+TODO:
+  * Pub sub signal group
+  * Client site aanpassen

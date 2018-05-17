@@ -1,7 +1,6 @@
 const fs = require('fs');
 const n3 = require('n3');
 const nquad_parser = n3.Parser({format: 'application/n-quads'});
-// const writer = n3.Writer(process.stdout, {prefixes: {}});
 const util = require('util');
 const n3Util = n3.Util
 const { DataFactory } = n3
@@ -41,7 +40,6 @@ module.exports = new class Utils {
 
   async nQuadsToTrig(n_quads){
     let writer = n3.Writer({ prefixes: {} });
-    console.log(n_quads);
 
     for(let triple of n_quads){
       writer.addQuad(
@@ -54,30 +52,26 @@ module.exports = new class Utils {
 
     return new Promise(resolve => {
       writer.end((error, result) => {
-        console.log(result);
         resolve(result);
       })});
   }
 
   async appendToFile(path, data) {
     let trig_string =  await this.nQuadsToTrig(data);
-    return await appendFile(path, JSON.stringify(trig_string));
+    return await appendFile(path, trig_string);
   }
 
   getGeneratedAtTimeValue(rdf) {
     for(let triple of rdf){
       if(triple.predicate.value === "http://www.w3.org/ns/prov#generatedAtTime")
-        return triple.object.value;
-        //return new Date(n3Util.getLiteralValue(triple.object.value));
+        return new Date(triple.object.value);
     }
   }
 
   getSignalGroup(rdf){
     for(let triple of rdf){
-      console.log(triple.predicate);
-      if(triple.predicate.value === "http://example.org#fragmentGroup")
-        return triple.object.value.split("\/").slice(-1)[0];
-        //return new Date(n3Util.getLiteralValue(triple.object.value));
+      if(triple.predicate.value === "http://www.w3.org/ns/prov#generatedAtTime")
+        return triple.subject.value.split("\/").slice(-1)[0];
     }
   }
 
@@ -160,11 +154,17 @@ module.exports = new class Utils {
   formatTriples(format, triples, prefixes) {
     return new Promise((resolve, reject) => {
       let writer = n3.Writer({
-        prefixes: prefixes,
-        format: format
+        prefixes: {},
       });
 
-      writer.addQuad(triples);
+      for(let triple of triples){
+        writer.addQuad(
+          namedNode(triple.subject),
+          namedNode(triple.predicate),
+          namedNode(triple.object),
+          namedNode(triple.graph)
+        );
+      }
 
       writer.end((err, res) => {
         if(err) reject(err);
