@@ -3,7 +3,7 @@ Triplestore for traffic light data
 
 run:
 ```bash
-  node index.js | node timeseries-server/bin/timeseries-server.js -c timeseries-server/config.json
+  node YOUR_SPAT2LD.js | node bin/timeseries-server.js -c timeseries-server/config.json
 ```
 
 Now you are able to fetch fragments using:
