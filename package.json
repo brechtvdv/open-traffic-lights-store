@@ -1,30 +1,19 @@
 {
-  "name": "open-traffic-lights-store",
-  "version": "1.0.0",
-  "description": "Triplestore for traffic light data",
-  "main": "index.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/Lamasaurus/open-traffic-lights-store.git"
-  },
-  "keywords": [
-    "open",
-    "traffic",
-    "light",
-    "triplestore",
-    "RDF"
-  ],
-  "author": "Sander Vanhove",
-  "license": "ISC",
-  "bugs": {
-    "url": "https://github.com/Lamasaurus/open-traffic-lights-store/issues"
-  },
-  "homepage": "https://github.com/Lamasaurus/open-traffic-lights-store#readme",
+  "name": "timeseries-server",
+  "version": "0.1.0",
+  "description": "A server to host linked time series data as linked data fragments",
+  "main": "bin/timeseries-server.js",
   "dependencies": {
+    "jsonld": "^1.0.1",
+    "koa": "^2.4.1",
+    "koa-router": "^7.2.1",
+    "md5": "^2.2.1",
+    "moment": "^2.21.0",
     "n3": "^1.0.0-beta.1",
-    "rdflib": "^0.16.7"
-  }
+    "ws": "^3.3.1"
+  },
+  "devDependencies": {},
+  "author": "http://idlab.technology/#organization",
+  "license": "MIT",
+  "keywords": []
 }
