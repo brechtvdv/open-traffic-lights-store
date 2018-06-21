@@ -1,0 +1,15 @@
+{
+	"serverUrl": "http://localhost:8080/",
+	"httpPort": 8080,
+	"interfaces": [
+		{
+			"name": "RawData",
+			"path": "../lib/interfaces/RawData",
+			"websocket": true,
+			"wsPort": 3001,
+			"fragmentsPath": "./example/data/RawData",
+			"staticTriples": "",
+			"maxMinutes": 10
+		}
+	]
+}
