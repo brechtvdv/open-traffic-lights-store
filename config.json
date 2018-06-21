@@ -9,7 +9,7 @@
 			"wsPort": 3001,
 			"fragmentsPath": "./example/data/RawData",
 			"staticTriples": "",
-			"maxMinutes": 10
+			"maxMinutes": 2
 		}
 	]
 }
